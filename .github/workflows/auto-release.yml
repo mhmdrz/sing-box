@@ -91,9 +91,12 @@ jobs:
           OUT="sing-box-${VER}-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p dist
           echo "tags: $TAGS"
+          # Upstream's shared linker flags (includes -checklinkname=0, which is
+          # REQUIRED for the badtls //go:linkname hack to compile on Go 1.23+).
+          LDFLAGS_SHARED="$(cat release/LDFLAGS)"
           go build -v -trimpath \
             -tags "$TAGS" \
-            -ldflags "-s -w -X github.com/sagernet/sing-box/constant.Version=${VER}" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VER}' ${LDFLAGS_SHARED} -s -w -buildid=" \
             -o "dist/${OUT}/sing-box" \
             ./cmd/sing-box
           cp LICENSE "dist/${OUT}/" 2>/dev/null || true

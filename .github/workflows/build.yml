@@ -56,9 +56,12 @@ jobs:
         run: |
           OUT="sing-box-${{ steps.ver.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p dist
+          # Upstream's shared linker flags (includes -checklinkname=0, which is
+          # REQUIRED for the badtls //go:linkname hack to compile on Go 1.23+).
+          LDFLAGS_SHARED="$(cat release/LDFLAGS)"
           go build -v -trimpath \
             -tags "${{ steps.tags.outputs.tags }}" \
-            -ldflags "-s -w -X github.com/sagernet/sing-box/constant.Version=${{ steps.ver.outputs.version }}" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${{ steps.ver.outputs.version }}' ${LDFLAGS_SHARED} -s -w -buildid=" \
             -o "dist/${OUT}/sing-box" \
             ./cmd/sing-box
           # sanity check: confirm v2ray_api is compiled in
