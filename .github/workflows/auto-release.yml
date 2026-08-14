@@ -1,0 +1,126 @@
+name: auto-release-v2ray-api
+
+# Watches upstream SagerNet/sing-box for new releases and, when one appears
+# that we haven't built yet, checks out that version's source, builds it with
+# V2Ray API enabled, and publishes the binaries as a Release in THIS repo.
+#
+# Fully automated: no manual sync needed. Runs on a schedule + on demand.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # daily at 06:00 UTC — adjust as you like
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Force-build a specific upstream tag (e.g. v1.13.18). Blank = latest."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_tag: ${{ steps.detect.outputs.upstream_tag }}
+      our_tag: ${{ steps.detect.outputs.our_tag }}
+      should_build: ${{ steps.detect.outputs.should_build }}
+    steps:
+      - name: Detect latest upstream release and compare with ours
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FORCED="${{ github.event.inputs.tag }}"
+          if [ -n "$FORCED" ]; then
+            UP="$FORCED"
+          else
+            UP="$(gh api repos/SagerNet/sing-box/releases/latest --jq .tag_name)"
+          fi
+          OUR="${UP}-v2ray"   # our release tag mirrors upstream + suffix
+          echo "Upstream: $UP  ->  ours: $OUR"
+          echo "upstream_tag=$UP" >> "$GITHUB_OUTPUT"
+          echo "our_tag=$OUR" >> "$GITHUB_OUTPUT"
+
+          if gh release view "$OUR" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Already released $OUR — nothing to do."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version detected: will build $OUR"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - name: Checkout upstream source at target tag
+        uses: actions/checkout@v4
+        with:
+          repository: SagerNet/sing-box
+          ref: ${{ needs.check.outputs.upstream_tag }}
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build with V2Ray API
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          BASE="$(cat release/DEFAULT_BUILD_TAGS_OTHERS)"
+          TAGS="${BASE},with_grpc,with_v2ray_api"
+          VER="${{ needs.check.outputs.our_tag }}"
+          OUT="sing-box-${VER}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p dist
+          echo "tags: $TAGS"
+          go build -v -trimpath \
+            -tags "$TAGS" \
+            -ldflags "-s -w -X github.com/sagernet/sing-box/constant.Version=${VER}" \
+            -o "dist/${OUT}/sing-box" \
+            ./cmd/sing-box
+          cp LICENSE "dist/${OUT}/" 2>/dev/null || true
+          tar -C dist -czf "dist/${OUT}.tar.gz" "${OUT}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-box-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [check, build]
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.our_tag }}
+          name: ${{ needs.check.outputs.our_tag }}
+          body: |
+            Automated build of sing-box `${{ needs.check.outputs.upstream_tag }}` with V2Ray API enabled
+            (`with_grpc,with_v2ray_api` appended to upstream default build tags).
+          files: artifacts/**/*.tar.gz
