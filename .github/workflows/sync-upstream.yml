@@ -1,0 +1,52 @@
+name: sync-upstream-release
+
+# Keeps a branch named `upstream-release` in this fork always pointing at the
+# exact source of the LATEST tagged sing-box release, and mirrors that release
+# tag into the fork. Runs on a schedule + on demand.
+#
+# Why a separate branch: your default branch (main) holds the CI workflows.
+# This keeps upstream's pristine source on its own branch so the two never
+# conflict. Your builds are unaffected — the auto-release workflow builds from
+# upstream directly; this is purely so your repo mirrors the latest source.
+
+on:
+  schedule:
+    - cron: "43 */6 * * *"   # every 6h at :43 (staggered from the build watcher)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork (provides git + push credentials)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror latest upstream release into `upstream-release`
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/SagerNet/sing-box.git 2>/dev/null || true
+
+          LATEST="$(gh api repos/SagerNet/sing-box/releases/latest --jq .tag_name)"
+          echo "Latest upstream release: $LATEST"
+
+          # Fetch just that release tag from upstream.
+          git fetch upstream --force "refs/tags/${LATEST}:refs/tags/${LATEST}"
+
+          # Point our upstream-release branch exactly at that release's source.
+          git branch -f upstream-release "${LATEST}"
+          git push origin --force upstream-release
+
+          # Keep the release tag itself available in the fork for checkouts.
+          git push origin --force "refs/tags/${LATEST}:refs/tags/${LATEST}"
+
+          echo "Done: upstream-release now mirrors $LATEST"
