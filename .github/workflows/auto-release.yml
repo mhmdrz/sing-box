@@ -8,7 +8,13 @@ name: auto-release-v2ray-api
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # daily at 06:00 UTC — adjust as you like
+    # Every 6 hours at :23. NOTE on GitHub's scheduler quirks:
+    #  - Scheduled workflows ONLY run from the file on the DEFAULT branch.
+    #  - Runs at :00 of popular hours are often delayed/skipped under load,
+    #    so we use an odd minute (:23) off the top of the hour.
+    #  - GitHub auto-disables scheduled workflows after 60 days with no repo
+    #    commits — a build every few weeks keeps it alive.
+    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       tag:
