@@ -42,11 +42,17 @@ jobs:
           # Fetch just that release tag from upstream.
           git fetch upstream --force "refs/tags/${LATEST}:refs/tags/${LATEST}"
 
-          # Point our upstream-release branch exactly at that release's source.
-          git branch -f upstream-release "${LATEST}"
+          # Reset our upstream-release branch to exactly that release's source.
+          git checkout -B upstream-release "${LATEST}"
+
+          # The Actions GITHUB_TOKEN is NOT permitted to push files under
+          # .github/workflows/ (GitHub blocks it without the `workflows` scope),
+          # and we don't want upstream's CI running in our fork anyway — so strip
+          # it. All Go source is preserved; only upstream workflow YAMLs go.
+          if [ -d .github/workflows ]; then
+            git rm -r --quiet .github/workflows
+            git commit -m "chore(mirror): ${LATEST} source (upstream workflows stripped)"
+          fi
+
           git push origin --force upstream-release
-
-          # Keep the release tag itself available in the fork for checkouts.
-          git push origin --force "refs/tags/${LATEST}:refs/tags/${LATEST}"
-
           echo "Done: upstream-release now mirrors $LATEST"
