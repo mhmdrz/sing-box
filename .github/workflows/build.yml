@@ -32,7 +32,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # go.mod declares go 1.24.x, but upstream deps (tailscale) use
+          # reflect.TypeAssert which needs Go 1.25+. Pin to latest stable Go
+          # rather than reading go.mod, matching upstream's own CI.
+          go-version: stable
           check-latest: true
 
       - name: Resolve build tags (upstream defaults + V2Ray API)
